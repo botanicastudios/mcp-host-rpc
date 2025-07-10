@@ -1,8 +1,11 @@
 {
   "name": "@botanicastudios/mcp-host-rpc",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "mcp-host-rpc": "dist/index.js"
+  },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
@@ -13,10 +16,14 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage"
   },
-  "author": "",
-  "license": "ISC",
-  "keywords": [],
-  "description": "",
+  "author": "Botanica Studios",
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "host",
+    "rpc"
+  ],
+  "description": "A simple MCP host RPC bridge",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.15.0",
     "json-rpc-2.0": "^1.7.1",

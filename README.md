@@ -1,6 +1,8 @@
-# MCP Host RPC Bridge Example
+# MCP Host RPC Bridge
 
 This MCP server bridges MCP tool calls to JSON-RPC function calls over a socket connection.
+
+If you need this, you'll know.
 
 ## Environment Variables
 
@@ -15,8 +17,7 @@ export TOOLS='{"add":{"title":"Addition Tool","description":"Add two numbers","i
 ## Running the Server
 
 ```bash
-npm run build
-npm start
+npx -y @botanicastudios/mcp-host-rpc
 ```
 
 ## How It Works
@@ -46,6 +47,36 @@ async function handleAddService(authToken, args) {
   return [{ type: "text", text: String(result) }];
 }
 ```
+
+## Host Example Script
+
+A complete working example is provided in `examples/host-example.cjs`. This script demonstrates how to:
+
+1. **Create a JSON-RPC server** that exposes multiple functions
+2. **Generate environment variables** automatically for the MCP server
+3. **Handle authentication** with secure token generation
+4. **Implement sample RPC functions** like file reading, directory listing, and message echoing
+5. **Test the integration** with built-in testing functions
+
+### Running the Example
+
+```bash
+# Start the host example (this will print the environment variables)
+node examples/host-example.cjs
+
+# In another terminal, copy the printed environment variables and run:
+export AUTH_TOKEN="generated-token"
+export PIPE="/tmp/mcp-pipe-xxxxx.sock"
+export TOOLS='{"get-current-time":...}'
+npm run dev
+```
+
+The example includes four sample tools:
+
+- `get-current-time`: Returns current timestamp and timezone
+- `read-file`: Reads file contents with error handling
+- `list-directory`: Lists directory contents with file type detection
+- `echo`: Echoes messages with optional transformations (uppercase, lowercase, reverse)
 
 ## TOOLS Configuration Format
 
