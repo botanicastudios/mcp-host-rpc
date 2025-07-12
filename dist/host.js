@@ -121,7 +121,7 @@ function zodToJsonSchema(zodSchema) {
 export class McpHost {
     server;
     socketServer;
-    authToken;
+    secret;
     pipePath;
     debug;
     rpcHandlers = new Map();
@@ -129,7 +129,7 @@ export class McpHost {
     isStarted = false;
     constructor(options = {}) {
         this.server = new JSONRPCServer();
-        this.authToken = options.authToken || this.generateAuthToken();
+        this.secret = options.secret || this.generateAuthToken();
         this.debug = options.debug ?? false;
         // Always use Unix socket, generate path if not provided
         const tempDir = os.tmpdir();
@@ -151,11 +151,11 @@ export class McpHost {
         }
     }
     createJWT(context) {
-        return jwt.sign({ context }, this.authToken, { noTimestamp: true });
+        return jwt.sign({ context }, this.secret, { noTimestamp: true });
     }
     verifyJWT(token) {
         try {
-            const decoded = jwt.verify(token, this.authToken);
+            const decoded = jwt.verify(token, this.secret);
             return decoded.context;
         }
         catch (error) {
@@ -278,7 +278,7 @@ export class McpHost {
                 this.log("RPC server started");
                 this.log("Available tools:", Object.keys(this.toolsConfig));
                 resolve({
-                    authToken: this.authToken,
+                    secret: this.secret,
                     pipePath: this.pipePath,
                     toolsConfig: this.toolsConfig,
                 });

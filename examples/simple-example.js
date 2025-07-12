@@ -15,7 +15,7 @@ console.log("🚀 MCP Host Example - Core Functionality\n");
 
 // Create and auto-start the host
 const host = createMcpHost({
-  authToken: "example-secret-key-12345",
+  secret: "example-secret-key-12345",
   start: true,
   debug: true,
 });

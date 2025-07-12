@@ -155,7 +155,7 @@ export interface RpcHandler {
 
 export interface McpHostOptions {
   /** Secret key for JWT signing/verification. If not provided, one will be generated. */
-  authToken?: string;
+  secret?: string;
   /** Custom pipe path. If not provided, a temporary one will be created. */
   pipePath?: string;
   /** Auto-start the server immediately */
@@ -185,7 +185,7 @@ export interface McpHostServer {
   ): Record<string, any>;
   /** Start the RPC server */
   start(): Promise<{
-    authToken: string;
+    secret: string;
     pipePath: string;
     toolsConfig: Record<string, ToolProperties>;
   }>;
@@ -196,7 +196,7 @@ export interface McpHostServer {
 export class McpHost implements McpHostServer {
   private server: JSONRPCServer;
   private socketServer?: net.Server;
-  private authToken: string;
+  private secret: string;
   private pipePath: string;
   private debug: boolean;
   private rpcHandlers: Map<string, RpcHandler> = new Map();
@@ -205,7 +205,7 @@ export class McpHost implements McpHostServer {
 
   constructor(options: McpHostOptions = {}) {
     this.server = new JSONRPCServer();
-    this.authToken = options.authToken || this.generateAuthToken();
+    this.secret = options.secret || this.generateAuthToken();
     this.debug = options.debug ?? false;
 
     // Always use Unix socket, generate path if not provided
@@ -232,12 +232,12 @@ export class McpHost implements McpHostServer {
   }
 
   private createJWT(context: any): string {
-    return jwt.sign({ context }, this.authToken, { noTimestamp: true });
+    return jwt.sign({ context }, this.secret, { noTimestamp: true });
   }
 
   private verifyJWT(token: string): any {
     try {
-      const decoded = jwt.verify(token, this.authToken) as any;
+      const decoded = jwt.verify(token, this.secret) as any;
       return decoded.context;
     } catch (error) {
       throw new Error(
@@ -341,7 +341,7 @@ export class McpHost implements McpHostServer {
   }
 
   async start(): Promise<{
-    authToken: string;
+    secret: string;
     pipePath: string;
     toolsConfig: Record<string, ToolProperties>;
   }> {
@@ -404,7 +404,7 @@ export class McpHost implements McpHostServer {
         this.log("Available tools:", Object.keys(this.toolsConfig));
 
         resolve({
-          authToken: this.authToken,
+          secret: this.secret,
           pipePath: this.pipePath,
           toolsConfig: this.toolsConfig,
         });

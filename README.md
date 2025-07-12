@@ -27,7 +27,7 @@ import { createMcpHost } from "@botanicastudios/mcp-host-rpc/host";
 
 // Create and auto-start a host with a signing key
 const host = createMcpHost({
-  authToken: "your-secret-key", // Used for JWT signing/verification
+  secret: "your-secret-key", // Used for JWT signing/verification
   start: true, // Auto-start the server
   debug: true,
 });
@@ -107,7 +107,7 @@ Creates a new MCP host instance.
 
 **Options:**
 
-- `authToken?: string` - Secret key for JWT signing/verification (auto-generated if not provided)
+- `secret?: string` - Secret key for JWT signing/verification (auto-generated if not provided)
 - `pipePath?: string` - Custom Unix socket path (auto-generated if not provided)
 - `start?: boolean` - Auto-start the server immediately (default: false)
 - `debug?: boolean` - Enable debug logging (default: false)
@@ -249,7 +249,7 @@ import * as path from "path";
 
 // Create and auto-start host
 const host = createMcpHost({
-  authToken: "my-secret-signing-key",
+  secret: "my-secret-signing-key",
   start: true,
   debug: true,
 });
@@ -558,7 +558,7 @@ sequenceDiagram
     participant MCP as MCP Server Process<br/>(Bridge)
 
     Note over Host: Setup Phase
-    Host->>Host: createMcpHost({ authToken: 'secret' })
+    Host->>Host: createMcpHost({ secret: 'secret' })
     Host->>Host: registerTool('read-file', {...}, handler)
     Host->>Host: getMCPServerConfig('user', ['read-file'], { userId: '123' })
     Note right of Host: Generates JWT with context
@@ -592,7 +592,7 @@ The library uses JWT tokens to securely pass context from MCP servers to RPC han
 ```javascript
 // When creating MCP server config
 const context = { userId: "123", permissions: ["read"] };
-const jwt = sign({ context }, authToken); // Signed with host's authToken
+const jwt = sign({ context }, secret); // Signed with host's secret
 
 // In RPC handler
 async (context, args) => {

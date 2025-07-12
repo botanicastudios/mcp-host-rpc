@@ -17,7 +17,7 @@ console.log("🧪 MCP Host Example - Zod Schema Validation\n");
 
 // Create and auto-start the host
 const host = createMcpHost({
-  authToken: "zod-auto-example-secret-key",
+  secret: "zod-auto-example-secret-key",
   start: true,
   debug: true,
 });

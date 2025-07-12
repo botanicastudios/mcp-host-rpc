@@ -22,7 +22,7 @@ export interface RpcHandler {
 }
 export interface McpHostOptions {
     /** Secret key for JWT signing/verification. If not provided, one will be generated. */
-    authToken?: string;
+    secret?: string;
     /** Custom pipe path. If not provided, a temporary one will be created. */
     pipePath?: string;
     /** Auto-start the server immediately */
@@ -46,7 +46,7 @@ export interface McpHostServer {
     }): Record<string, any>;
     /** Start the RPC server */
     start(): Promise<{
-        authToken: string;
+        secret: string;
         pipePath: string;
         toolsConfig: Record<string, ToolProperties>;
     }>;
@@ -56,7 +56,7 @@ export interface McpHostServer {
 export declare class McpHost implements McpHostServer {
     private server;
     private socketServer?;
-    private authToken;
+    private secret;
     private pipePath;
     private debug;
     private rpcHandlers;
@@ -78,7 +78,7 @@ export declare class McpHost implements McpHostServer {
         args?: string[];
     }): Record<string, any>;
     start(): Promise<{
-        authToken: string;
+        secret: string;
         pipePath: string;
         toolsConfig: Record<string, ToolProperties>;
     }>;
