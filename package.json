@@ -1,6 +1,6 @@
 {
   "name": "@botanicastudios/mcp-host-rpc",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "main": "dist/index.js",
   "exports": {
@@ -22,9 +22,9 @@
     "dev": "tsx src/index.ts",
     "watch": "nodemon --exec tsx src/index.ts",
     "example": "npm run build && node examples/simple-example.js",
-    "test": "vitest",
+    "example:zod": "npm run build && node examples/zod-example.js",
+    "test": "vitest run",
     "test:ui": "vitest --ui",
-    "test:run": "vitest run",
     "test:coverage": "vitest run --coverage"
   },
   "author": "Botanica Studios",

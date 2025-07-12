@@ -15,7 +15,7 @@ export interface ToolProperties {
         properties: Record<string, any>;
         required?: string[];
         additionalProperties?: boolean;
-    };
+    } | any;
 }
 export interface RpcHandler {
     (context: any, args: any): Promise<any>;
@@ -40,7 +40,10 @@ export interface McpHostServer {
         TOOLS: string;
     };
     /** Get complete MCP client configuration */
-    getMCPServerConfig(name: string, tools: string[], context: any): Record<string, any>;
+    getMCPServerConfig(name: string, tools: string[], context: any, options?: {
+        command?: string | string[];
+        args?: string[];
+    }): Record<string, any>;
     /** Start the RPC server */
     start(): Promise<{
         authToken: string;
@@ -70,7 +73,10 @@ export declare class McpHost implements McpHostServer {
         PIPE: string;
         TOOLS: string;
     };
-    getMCPServerConfig(name: string, tools: string[], context: any): Record<string, any>;
+    getMCPServerConfig(name: string, tools: string[], context: any, options?: {
+        command?: string | string[];
+        args?: string[];
+    }): Record<string, any>;
     start(): Promise<{
         authToken: string;
         pipePath: string;

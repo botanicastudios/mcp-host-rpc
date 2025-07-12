@@ -16,16 +16,137 @@ import * as crypto from "crypto";
 // @ts-ignore - jsonwebtoken types may not be available in all environments
 import jwt from "jsonwebtoken";
 
+/**
+ * Check if an object is a Zod schema
+ */
+function isZodSchema(obj: any): boolean {
+  return (
+    obj &&
+    typeof obj === "object" &&
+    obj._def &&
+    typeof obj._def.typeName === "string" &&
+    obj._def.typeName.startsWith("Zod")
+  );
+}
+
+/**
+ * Convert Zod schema to JSON Schema
+ */
+function zodToJsonSchema(zodSchema: any): any {
+  function getDescription(schema: any) {
+    return schema._def.description || undefined;
+  }
+
+  function processSchema(schema: any): any {
+    const typeName = schema._def.typeName;
+
+    switch (typeName) {
+      case "ZodObject": {
+        const properties: Record<string, any> = {};
+        const required: string[] = [];
+
+        for (const [key, value] of Object.entries(schema.shape)) {
+          properties[key] = zodToJsonSchema(value);
+          if (!(value as any).isOptional()) {
+            required.push(key);
+          }
+        }
+
+        return {
+          type: "object",
+          properties,
+          required,
+          additionalProperties: false,
+        };
+      }
+
+      case "ZodString": {
+        const result: any = { type: "string" };
+        const desc = getDescription(schema);
+        if (desc) result.description = desc;
+
+        // Handle string constraints
+        const checks = schema._def.checks || [];
+        for (const check of checks) {
+          if (check.kind === "min") result.minLength = check.value;
+          if (check.kind === "max") result.maxLength = check.value;
+        }
+
+        return result;
+      }
+
+      case "ZodNumber": {
+        const result: any = { type: "number" };
+        const desc = getDescription(schema);
+        if (desc) result.description = desc;
+        return result;
+      }
+
+      case "ZodBoolean": {
+        const result: any = { type: "boolean" };
+        const desc = getDescription(schema);
+        if (desc) result.description = desc;
+        return result;
+      }
+
+      case "ZodArray": {
+        const result: any = {
+          type: "array",
+          items: zodToJsonSchema(schema._def.type),
+        };
+        const desc = getDescription(schema);
+        if (desc) result.description = desc;
+        return result;
+      }
+
+      case "ZodEnum": {
+        const result: any = {
+          type: "string",
+          enum: schema._def.values,
+        };
+        const desc = getDescription(schema);
+        if (desc) result.description = desc;
+        return result;
+      }
+
+      case "ZodOptional": {
+        return zodToJsonSchema(schema._def.innerType);
+      }
+
+      case "ZodDefault": {
+        const innerSchema = zodToJsonSchema(schema._def.innerType);
+        innerSchema.default = schema._def.defaultValue();
+        return innerSchema;
+      }
+
+      case "ZodEffects": {
+        // For .refine() and .transform(), use the inner schema
+        return zodToJsonSchema(schema._def.schema);
+      }
+
+      default:
+        console.warn(
+          `[MCP-Host] Unsupported Zod type: ${typeName}, falling back to string`
+        );
+        return { type: "string" };
+    }
+  }
+
+  return processSchema(zodSchema);
+}
+
 export interface ToolProperties {
   title: string;
   description: string;
   functionName: string;
-  inputSchema: {
-    type: "object";
-    properties: Record<string, any>;
-    required?: string[];
-    additionalProperties?: boolean;
-  };
+  inputSchema:
+    | {
+        type: "object";
+        properties: Record<string, any>;
+        required?: string[];
+        additionalProperties?: boolean;
+      }
+    | any; // Allow Zod schemas or JSON Schema objects
 }
 
 export interface RpcHandler {
@@ -59,7 +180,8 @@ export interface McpHostServer {
   getMCPServerConfig(
     name: string,
     tools: string[],
-    context: any
+    context: any,
+    options?: { command?: string | string[]; args?: string[] }
   ): Record<string, any>;
   /** Start the RPC server */
   start(): Promise<{
@@ -132,7 +254,15 @@ export class McpHost implements McpHostServer {
     handler: RpcHandler
   ): void {
     this.rpcHandlers.set(properties.functionName, handler);
-    this.toolsConfig[toolName] = properties;
+
+    // Automatically convert Zod schema to JSON Schema if needed
+    const processedProperties = { ...properties };
+    if (isZodSchema(properties.inputSchema)) {
+      this.log(`Converting Zod schema to JSON Schema for tool: ${toolName}`);
+      processedProperties.inputSchema = zodToJsonSchema(properties.inputSchema);
+    }
+
+    this.toolsConfig[toolName] = processedProperties;
 
     // Create a wrapper that verifies JWT and extracts context
     const wrappedHandler = async (...params: any[]) => {
@@ -177,15 +307,34 @@ export class McpHost implements McpHostServer {
   getMCPServerConfig(
     name: string,
     tools: string[],
-    context: any
+    context: any,
+    options?: { command?: string | string[]; args?: string[] }
   ): Record<string, any> {
     const envVars = this.getMCPServerEnvVars(tools, context);
+
+    let command = "npx -y @botanicastudios/mcp-host-rpc";
+    let args: string[] = [];
+
+    if (options?.command) {
+      if (Array.isArray(options.command)) {
+        if (options.command.length > 0) {
+          command = options.command[0];
+          args = options.command.slice(1);
+        }
+      } else {
+        command = options.command;
+      }
+    }
+
+    if (options?.args) {
+      args = args.concat(options.args);
+    }
 
     return {
       [name]: {
         type: "stdio",
-        command: "npx -y @botanicastudios/mcp-host-rpc",
-        args: [],
+        command,
+        args,
         env: envVars,
       },
     };
