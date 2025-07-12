@@ -7,18 +7,18 @@ describe('Environment variable validation', () => {
     afterEach(() => {
         process.env = originalEnv;
     });
-    it('should require AUTH_TOKEN environment variable', () => {
-        delete process.env.AUTH_TOKEN;
+    it('should require CONTEXT_TOKEN environment variable', () => {
+        delete process.env.CONTEXT_TOKEN;
         process.env.TOOLS = '{}';
         process.env.PIPE = '/tmp/test.pipe';
         expect(() => {
-            if (!process.env.AUTH_TOKEN) {
-                throw new Error('AUTH_TOKEN environment variable is required');
+            if (!process.env.CONTEXT_TOKEN) {
+                throw new Error('CONTEXT_TOKEN environment variable is required');
             }
-        }).toThrow('AUTH_TOKEN environment variable is required');
+        }).toThrow('CONTEXT_TOKEN environment variable is required');
     });
     it('should require TOOLS environment variable', () => {
-        process.env.AUTH_TOKEN = 'test-token';
+        process.env.CONTEXT_TOKEN = 'test-token';
         delete process.env.TOOLS;
         process.env.PIPE = '/tmp/test.pipe';
         expect(() => {
@@ -28,7 +28,7 @@ describe('Environment variable validation', () => {
         }).toThrow('TOOLS environment variable is required');
     });
     it('should require PIPE environment variable', () => {
-        process.env.AUTH_TOKEN = 'test-token';
+        process.env.CONTEXT_TOKEN = 'test-token';
         process.env.TOOLS = '{}';
         delete process.env.PIPE;
         expect(() => {
@@ -38,7 +38,7 @@ describe('Environment variable validation', () => {
         }).toThrow('PIPE environment variable is required');
     });
     it('should validate TOOLS is valid JSON', () => {
-        process.env.AUTH_TOKEN = 'test-token';
+        process.env.CONTEXT_TOKEN = 'test-token';
         process.env.TOOLS = 'invalid-json';
         process.env.PIPE = '/tmp/test.pipe';
         expect(() => {
@@ -51,7 +51,7 @@ describe('Environment variable validation', () => {
         }).toThrow('TOOLS must be valid JSON');
     });
     it('should parse valid TOOLS JSON', () => {
-        process.env.AUTH_TOKEN = 'test-token';
+        process.env.CONTEXT_TOKEN = 'test-token';
         process.env.TOOLS = JSON.stringify({
             testTool: {
                 title: 'Test Tool',

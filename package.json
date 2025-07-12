@@ -1,8 +1,18 @@
 {
   "name": "@botanicastudios/mcp-host-rpc",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./host": {
+      "import": "./dist/host.js",
+      "types": "./dist/host.d.ts"
+    }
+  },
   "bin": {
     "mcp-host-rpc": "dist/index.js"
   },
@@ -11,6 +21,7 @@
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "watch": "nodemon --exec tsx src/index.ts",
+    "example": "npm run build && node examples/simple-example.js",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",
@@ -27,12 +38,15 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.15.0",
     "json-rpc-2.0": "^1.7.1",
+    "jsonwebtoken": "^9.0.2",
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^24.0.12",
     "@vitest/coverage-v8": "^3.2.4",
     "@vitest/ui": "^3.2.4",
+    "mcp-client": "^1.4.0",
     "nodemon": "^3.1.10",
     "ts-node": "^10.9.2",
     "tsx": "^4.20.3",

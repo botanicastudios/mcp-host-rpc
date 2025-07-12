@@ -6,12 +6,12 @@ import { JSONRPCClient } from "json-rpc-2.0";
 import * as net from "net";
 
 // Parse environment variables
-const authToken = process.env.AUTH_TOKEN;
+const contextToken = process.env.CONTEXT_TOKEN;
 const toolsConfig = process.env.TOOLS;
 const pipeAddress = process.env.PIPE;
 
-if (!authToken) {
-  throw new Error("AUTH_TOKEN environment variable is required");
+if (!contextToken) {
+  throw new Error("CONTEXT_TOKEN environment variable is required");
 }
 
 if (!toolsConfig) {
@@ -132,7 +132,7 @@ for (const [toolName, toolConfig] of Object.entries(tools)) {
       try {
         // Make RPC call to parent app
         const result = await rpcClient.request(toolConfig.functionName, [
-          authToken,
+          contextToken,
           args,
         ]);
         return { content: result };

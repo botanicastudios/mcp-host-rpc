@@ -26,7 +26,7 @@ describe('End-to-End MCP Server', () => {
     let originalEnv;
     beforeEach(() => {
         originalEnv = { ...process.env };
-        process.env.AUTH_TOKEN = 'test-auth-token';
+        process.env.CONTEXT_TOKEN = 'test-context-token';
         process.env.PIPE = '/tmp/test.pipe';
         vi.clearAllMocks();
     });
@@ -85,8 +85,8 @@ describe('End-to-End MCP Server', () => {
         process.env.TOOLS = JSON.stringify(complexToolsConfig);
         // Test that environment validation passes
         expect(() => {
-            if (!process.env.AUTH_TOKEN)
-                throw new Error('AUTH_TOKEN required');
+            if (!process.env.CONTEXT_TOKEN)
+                throw new Error('CONTEXT_TOKEN required');
             if (!process.env.TOOLS)
                 throw new Error('TOOLS required');
             if (!process.env.PIPE)
@@ -141,7 +141,7 @@ describe('End-to-End MCP Server', () => {
         mockRpcClient.request.mockResolvedValue({ result: 'success', data: 'test data' });
         const toolHandler = async (args) => {
             try {
-                const result = await mockRpcClient.request('testFunction', ['test-auth-token', args]);
+                const result = await mockRpcClient.request('testFunction', ['test-context-token', args]);
                 return { content: result };
             }
             catch (error) {
@@ -157,7 +157,7 @@ describe('End-to-End MCP Server', () => {
             }
         };
         const result = await toolHandler({ input: 'test input', options: { verbose: true } });
-        expect(mockRpcClient.request).toHaveBeenCalledWith('testFunction', ['test-auth-token', { input: 'test input', options: { verbose: true } }]);
+        expect(mockRpcClient.request).toHaveBeenCalledWith('testFunction', ['test-context-token', { input: 'test input', options: { verbose: true } }]);
         expect(result).toEqual({ content: { result: 'success', data: 'test data' } });
         // Test error handling
         mockRpcClient.request.mockRejectedValue(new Error('Network error'));

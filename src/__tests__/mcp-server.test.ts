@@ -30,7 +30,7 @@ describe('MCP Server initialization', () => {
 
   beforeEach(() => {
     originalEnv = { ...process.env };
-    process.env.AUTH_TOKEN = 'test-token';
+    process.env.CONTEXT_TOKEN = 'test-token';
     process.env.TOOLS = JSON.stringify({
       testTool: {
         title: 'Test Tool',

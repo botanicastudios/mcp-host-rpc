@@ -32,7 +32,7 @@ describe('End-to-End MCP Server', () => {
 
   beforeEach(() => {
     originalEnv = { ...process.env };
-    process.env.AUTH_TOKEN = 'test-auth-token';
+    process.env.CONTEXT_TOKEN = 'test-context-token';
     process.env.PIPE = '/tmp/test.pipe';
     vi.clearAllMocks();
   });
@@ -95,7 +95,7 @@ describe('End-to-End MCP Server', () => {
 
     // Test that environment validation passes
     expect(() => {
-      if (!process.env.AUTH_TOKEN) throw new Error('AUTH_TOKEN required');
+      if (!process.env.CONTEXT_TOKEN) throw new Error('CONTEXT_TOKEN required');
       if (!process.env.TOOLS) throw new Error('TOOLS required');
       if (!process.env.PIPE) throw new Error('PIPE required');
     }).not.toThrow();
@@ -156,7 +156,7 @@ describe('End-to-End MCP Server', () => {
 
     const toolHandler = async (args: any) => {
       try {
-        const result = await mockRpcClient.request('testFunction', ['test-auth-token', args]);
+        const result = await mockRpcClient.request('testFunction', ['test-context-token', args]);
         return { content: result };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -175,7 +175,7 @@ describe('End-to-End MCP Server', () => {
 
     expect(mockRpcClient.request).toHaveBeenCalledWith(
       'testFunction',
-      ['test-auth-token', { input: 'test input', options: { verbose: true } }]
+      ['test-context-token', { input: 'test input', options: { verbose: true } }]
     );
     expect(result).toEqual({ content: { result: 'success', data: 'test data' } });
 

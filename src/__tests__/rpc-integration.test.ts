@@ -19,7 +19,7 @@ describe('RPC Integration', () => {
 
   beforeEach(() => {
     originalEnv = { ...process.env };
-    process.env.AUTH_TOKEN = 'test-token';
+    process.env.CONTEXT_TOKEN = 'test-token';
     process.env.TOOLS = '{}';
     process.env.PIPE = '/tmp/test.pipe';
 
@@ -183,9 +183,9 @@ describe('RPC Integration', () => {
     const rpcClient = new JSONRPCClient(() => {});
     mockRpcClient.request.mockResolvedValue('test result');
 
-    const result = await rpcClient.request('testMethod', ['auth-token', { param: 'value' }]);
+    const result = await rpcClient.request('testMethod', ['context-token', { param: 'value' }]);
 
-    expect(mockRpcClient.request).toHaveBeenCalledWith('testMethod', ['auth-token', { param: 'value' }]);
+    expect(mockRpcClient.request).toHaveBeenCalledWith('testMethod', ['context-token', { param: 'value' }]);
     expect(result).toBe('test result');
   });
 
@@ -194,6 +194,6 @@ describe('RPC Integration', () => {
     const testError = new Error('RPC failed');
     mockRpcClient.request.mockRejectedValue(testError);
 
-    await expect(rpcClient.request('testMethod', ['auth-token', {}])).rejects.toThrow('RPC failed');
+    await expect(rpcClient.request('testMethod', ['context-token', {}])).rejects.toThrow('RPC failed');
   });
 });
