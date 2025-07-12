@@ -29,16 +29,17 @@ export class McpHost {
         this.debug = options.debug ?? false;
         // Always use Unix socket, generate path if not provided
         const tempDir = os.tmpdir();
-        this.pipePath = options.pipePath || path.join(tempDir, `mcp-pipe-${Date.now()}.sock`);
+        this.pipePath =
+            options.pipePath || path.join(tempDir, `mcp-pipe-${Date.now()}.sock`);
         // Auto-start if requested
         if (options.start) {
-            this.start().catch(error => {
-                this.log('Failed to auto-start server:', error);
+            this.start().catch((error) => {
+                this.log("Failed to auto-start server:", error);
             });
         }
     }
     generateAuthToken() {
-        return crypto.randomBytes(32).toString('hex');
+        return crypto.randomBytes(32).toString("hex");
     }
     log(message, ...args) {
         if (this.debug) {
@@ -61,7 +62,12 @@ export class McpHost {
         this.rpcHandlers.set(properties.functionName, handler);
         this.toolsConfig[toolName] = properties;
         // Create a wrapper that verifies JWT and extracts context
-        const wrappedHandler = async (contextToken, args) => {
+        const wrappedHandler = async (...params) => {
+            // JSON-RPC 2.0 wraps the client array parameters in another array
+            const [contextToken, args] = params[0];
+            if (typeof contextToken !== "string") {
+                throw new Error(`Expected JWT token as string, got ${typeof contextToken}`);
+            }
             const context = this.verifyJWT(contextToken);
             return await handler(context, args);
         };
@@ -80,7 +86,7 @@ export class McpHost {
         return {
             CONTEXT_TOKEN: contextToken,
             PIPE: this.pipePath,
-            TOOLS: JSON.stringify(filteredTools)
+            TOOLS: JSON.stringify(filteredTools),
         };
     }
     getMCPServerConfig(name, tools, context) {
@@ -90,8 +96,8 @@ export class McpHost {
                 type: "stdio",
                 command: "npx -y @botanicastudios/mcp-host-rpc",
                 args: [],
-                env: envVars
-            }
+                env: envVars,
+            },
         };
     }
     async start() {
@@ -104,51 +110,54 @@ export class McpHost {
         }
         return new Promise((resolve, reject) => {
             this.socketServer = net.createServer((socket) => {
-                this.log('Client connected');
-                socket.on('data', async (data) => {
-                    const lines = data.toString().split('\n').filter(line => line.trim());
+                this.log("Client connected");
+                socket.on("data", async (data) => {
+                    const lines = data
+                        .toString()
+                        .split("\n")
+                        .filter((line) => line.trim());
                     for (const line of lines) {
                         try {
                             const request = JSON.parse(line);
-                            this.log('Received request:', request.method);
+                            this.log("Received request:", request.method);
                             const response = await this.server.receive(request);
                             if (response) {
-                                socket.write(JSON.stringify(response) + '\n');
+                                socket.write(JSON.stringify(response) + "\n");
                             }
                         }
                         catch (error) {
-                            this.log('Error processing request:', error);
+                            this.log("Error processing request:", error);
                             const errorResponse = {
                                 jsonrpc: "2.0",
                                 error: {
                                     code: -32700,
                                     message: "Parse error",
-                                    data: error instanceof Error ? error.message : String(error)
+                                    data: error instanceof Error ? error.message : String(error),
                                 },
-                                id: null
+                                id: null,
                             };
-                            socket.write(JSON.stringify(errorResponse) + '\n');
+                            socket.write(JSON.stringify(errorResponse) + "\n");
                         }
                     }
                 });
-                socket.on('close', () => {
-                    this.log('Client disconnected');
+                socket.on("close", () => {
+                    this.log("Client disconnected");
                 });
-                socket.on('error', (error) => {
-                    this.log('Socket error:', error);
+                socket.on("error", (error) => {
+                    this.log("Socket error:", error);
                 });
             });
             const listenCallback = () => {
                 this.isStarted = true;
-                this.log('RPC server started');
-                this.log('Available tools:', Object.keys(this.toolsConfig));
+                this.log("RPC server started");
+                this.log("Available tools:", Object.keys(this.toolsConfig));
                 resolve({
                     authToken: this.authToken,
                     pipePath: this.pipePath,
-                    toolsConfig: this.toolsConfig
+                    toolsConfig: this.toolsConfig,
                 });
             };
-            this.socketServer.on('error', (error) => {
+            this.socketServer.on("error", (error) => {
                 reject(error);
             });
             this.socketServer.listen(this.pipePath, listenCallback);
@@ -158,13 +167,30 @@ export class McpHost {
         if (!this.isStarted || !this.socketServer) {
             return;
         }
-        return new Promise((resolve) => {
-            this.socketServer.close(() => {
-                if (fs.existsSync(this.pipePath)) {
-                    fs.unlinkSync(this.pipePath);
+        return new Promise((resolve, reject) => {
+            // Add timeout to prevent hanging
+            const timeout = setTimeout(() => {
+                this.log("Server stop timeout - forcing shutdown");
+                this.isStarted = false;
+                reject(new Error("Server stop timeout"));
+            }, 5000); // 5 second timeout
+            this.socketServer.close((error) => {
+                clearTimeout(timeout);
+                if (error) {
+                    this.log("Error stopping server:", error);
+                    reject(error);
+                    return;
+                }
+                try {
+                    if (fs.existsSync(this.pipePath)) {
+                        fs.unlinkSync(this.pipePath);
+                    }
+                }
+                catch (unlinkError) {
+                    this.log("Error removing socket file:", unlinkError);
                 }
                 this.isStarted = false;
-                this.log('Server stopped');
+                this.log("Server stopped");
                 resolve();
             });
         });

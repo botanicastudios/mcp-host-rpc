@@ -1,6 +1,6 @@
 /**
  * MCP Host RPC Server Module
- * 
+ *
  * This module provides a simplified API for host applications to set up an RPC server
  * that can be used with MCP (Model Context Protocol) servers. It handles the creation
  * of Unix domain sockets, JSON-RPC server setup, JWT-based authentication with context
@@ -45,13 +45,28 @@ export interface McpHostOptions {
 
 export interface McpHostServer {
   /** Register an RPC tool with context-based handler */
-  registerTool(toolName: string, properties: ToolProperties, handler: RpcHandler): void;
+  registerTool(
+    toolName: string,
+    properties: ToolProperties,
+    handler: RpcHandler
+  ): void;
   /** Get environment variables for MCP server instance */
-  getMCPServerEnvVars(tools: string[], context: any): { CONTEXT_TOKEN: string; PIPE: string; TOOLS: string };
+  getMCPServerEnvVars(
+    tools: string[],
+    context: any
+  ): { CONTEXT_TOKEN: string; PIPE: string; TOOLS: string };
   /** Get complete MCP client configuration */
-  getMCPServerConfig(name: string, tools: string[], context: any): Record<string, any>;
+  getMCPServerConfig(
+    name: string,
+    tools: string[],
+    context: any
+  ): Record<string, any>;
   /** Start the RPC server */
-  start(): Promise<{ authToken: string; pipePath: string; toolsConfig: Record<string, ToolProperties> }>;
+  start(): Promise<{
+    authToken: string;
+    pipePath: string;
+    toolsConfig: Record<string, ToolProperties>;
+  }>;
   /** Stop the RPC server */
   stop(): Promise<void>;
 }
@@ -73,18 +88,19 @@ export class McpHost implements McpHostServer {
 
     // Always use Unix socket, generate path if not provided
     const tempDir = os.tmpdir();
-    this.pipePath = options.pipePath || path.join(tempDir, `mcp-pipe-${Date.now()}.sock`);
+    this.pipePath =
+      options.pipePath || path.join(tempDir, `mcp-pipe-${Date.now()}.sock`);
 
     // Auto-start if requested
     if (options.start) {
-      this.start().catch(error => {
-        this.log('Failed to auto-start server:', error);
+      this.start().catch((error) => {
+        this.log("Failed to auto-start server:", error);
       });
     }
   }
 
   private generateAuthToken(): string {
-    return crypto.randomBytes(32).toString('hex');
+    return crypto.randomBytes(32).toString("hex");
   }
 
   private log(message: string, ...args: any[]): void {
@@ -102,25 +118,45 @@ export class McpHost implements McpHostServer {
       const decoded = jwt.verify(token, this.authToken) as any;
       return decoded.context;
     } catch (error) {
-      throw new Error(`Invalid JWT token: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Invalid JWT token: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
     }
   }
 
-  registerTool(toolName: string, properties: ToolProperties, handler: RpcHandler): void {
+  registerTool(
+    toolName: string,
+    properties: ToolProperties,
+    handler: RpcHandler
+  ): void {
     this.rpcHandlers.set(properties.functionName, handler);
     this.toolsConfig[toolName] = properties;
-    
+
     // Create a wrapper that verifies JWT and extracts context
-    const wrappedHandler = async (contextToken: string, args: any) => {
+    const wrappedHandler = async (...params: any[]) => {
+      // JSON-RPC 2.0 wraps the client array parameters in another array
+      const [contextToken, args] = params[0];
+
+      if (typeof contextToken !== "string") {
+        throw new Error(
+          `Expected JWT token as string, got ${typeof contextToken}`
+        );
+      }
+
       const context = this.verifyJWT(contextToken);
       return await handler(context, args);
     };
-    
+
     this.server.addMethod(properties.functionName, wrappedHandler);
     this.log(`Registered tool: ${toolName} -> ${properties.functionName}`);
   }
 
-  getMCPServerEnvVars(tools: string[], context: any): { CONTEXT_TOKEN: string; PIPE: string; TOOLS: string } {
+  getMCPServerEnvVars(
+    tools: string[],
+    context: any
+  ): { CONTEXT_TOKEN: string; PIPE: string; TOOLS: string } {
     // Filter tools config to only include requested tools
     const filteredTools: Record<string, any> = {};
     for (const toolName of tools) {
@@ -130,28 +166,36 @@ export class McpHost implements McpHostServer {
     }
 
     const contextToken = this.createJWT(context);
-    
+
     return {
       CONTEXT_TOKEN: contextToken,
       PIPE: this.pipePath,
-      TOOLS: JSON.stringify(filteredTools)
+      TOOLS: JSON.stringify(filteredTools),
     };
   }
 
-  getMCPServerConfig(name: string, tools: string[], context: any): Record<string, any> {
+  getMCPServerConfig(
+    name: string,
+    tools: string[],
+    context: any
+  ): Record<string, any> {
     const envVars = this.getMCPServerEnvVars(tools, context);
-    
+
     return {
       [name]: {
         type: "stdio",
         command: "npx -y @botanicastudios/mcp-host-rpc",
         args: [],
-        env: envVars
-      }
+        env: envVars,
+      },
     };
   }
 
-  async start(): Promise<{ authToken: string; pipePath: string; toolsConfig: Record<string, ToolProperties> }> {
+  async start(): Promise<{
+    authToken: string;
+    pipePath: string;
+    toolsConfig: Record<string, ToolProperties>;
+  }> {
     if (this.isStarted) {
       throw new Error("Server is already started");
     }
@@ -163,58 +207,61 @@ export class McpHost implements McpHostServer {
 
     return new Promise((resolve, reject) => {
       this.socketServer = net.createServer((socket) => {
-        this.log('Client connected');
-        
-        socket.on('data', async (data) => {
-          const lines = data.toString().split('\n').filter(line => line.trim());
-          
+        this.log("Client connected");
+
+        socket.on("data", async (data) => {
+          const lines = data
+            .toString()
+            .split("\n")
+            .filter((line) => line.trim());
+
           for (const line of lines) {
             try {
               const request = JSON.parse(line);
-              this.log('Received request:', request.method);
+              this.log("Received request:", request.method);
               const response = await this.server.receive(request);
-              
+
               if (response) {
-                socket.write(JSON.stringify(response) + '\n');
+                socket.write(JSON.stringify(response) + "\n");
               }
             } catch (error) {
-              this.log('Error processing request:', error);
+              this.log("Error processing request:", error);
               const errorResponse = {
                 jsonrpc: "2.0",
                 error: {
                   code: -32700,
                   message: "Parse error",
-                  data: error instanceof Error ? error.message : String(error)
+                  data: error instanceof Error ? error.message : String(error),
                 },
-                id: null
+                id: null,
               };
-              socket.write(JSON.stringify(errorResponse) + '\n');
+              socket.write(JSON.stringify(errorResponse) + "\n");
             }
           }
         });
-        
-        socket.on('close', () => {
-          this.log('Client disconnected');
+
+        socket.on("close", () => {
+          this.log("Client disconnected");
         });
-        
-        socket.on('error', (error) => {
-          this.log('Socket error:', error);
+
+        socket.on("error", (error) => {
+          this.log("Socket error:", error);
         });
       });
 
       const listenCallback = () => {
         this.isStarted = true;
-        this.log('RPC server started');
-        this.log('Available tools:', Object.keys(this.toolsConfig));
-        
+        this.log("RPC server started");
+        this.log("Available tools:", Object.keys(this.toolsConfig));
+
         resolve({
           authToken: this.authToken,
           pipePath: this.pipePath,
-          toolsConfig: this.toolsConfig
+          toolsConfig: this.toolsConfig,
         });
       };
 
-      this.socketServer.on('error', (error) => {
+      this.socketServer.on("error", (error) => {
         reject(error);
       });
 
@@ -227,13 +274,33 @@ export class McpHost implements McpHostServer {
       return;
     }
 
-    return new Promise((resolve) => {
-      this.socketServer!.close(() => {
-        if (fs.existsSync(this.pipePath)) {
-          fs.unlinkSync(this.pipePath);
-        }
+    return new Promise((resolve, reject) => {
+      // Add timeout to prevent hanging
+      const timeout = setTimeout(() => {
+        this.log("Server stop timeout - forcing shutdown");
         this.isStarted = false;
-        this.log('Server stopped');
+        reject(new Error("Server stop timeout"));
+      }, 5000); // 5 second timeout
+
+      this.socketServer!.close((error) => {
+        clearTimeout(timeout);
+
+        if (error) {
+          this.log("Error stopping server:", error);
+          reject(error);
+          return;
+        }
+
+        try {
+          if (fs.existsSync(this.pipePath)) {
+            fs.unlinkSync(this.pipePath);
+          }
+        } catch (unlinkError) {
+          this.log("Error removing socket file:", unlinkError);
+        }
+
+        this.isStarted = false;
+        this.log("Server stopped");
         resolve();
       });
     });
