@@ -312,8 +312,8 @@ export class McpHost implements McpHostServer {
   ): Record<string, any> {
     const envVars = this.getMCPServerEnvVars(tools, context);
 
-    let command = "npx -y @botanicastudios/mcp-host-rpc";
-    let args: string[] = [];
+    let command = "npx";
+    let args: string[] = ["-y", "@botanicastudios/mcp-host-rpc"];
 
     if (options?.command) {
       if (Array.isArray(options.command)) {
@@ -324,10 +324,9 @@ export class McpHost implements McpHostServer {
       } else {
         command = options.command;
       }
-    }
-
-    if (options?.args) {
-      args = args.concat(options.args);
+      if (options?.args) {
+        args = args.concat(options.args);
+      }
     }
 
     return {
