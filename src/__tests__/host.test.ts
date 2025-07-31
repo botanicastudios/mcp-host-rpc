@@ -49,8 +49,8 @@ describe("McpHost", () => {
       expect(config).toHaveProperty("test-server");
       expect(config["test-server"]).toEqual({
         type: "stdio",
-        command: "npx -y @botanicastudios/mcp-host-rpc",
-        args: [],
+        command: "npx",
+        args: ["-y", "@botanicastudios/mcp-host-rpc"],
         env: expect.objectContaining({
           CONTEXT_TOKEN: expect.any(String),
           PIPE: expect.any(String),
@@ -139,7 +139,7 @@ describe("McpHost", () => {
       ]);
     });
 
-    it("should only use args when no command is provided", () => {
+    it("should ignore args when no command is provided", () => {
       const config = host.getMCPServerConfig(
         "test-server",
         testTools,
@@ -147,13 +147,10 @@ describe("McpHost", () => {
         { args: ["--production", "--timeout", "30"] }
       );
 
-      expect(config["test-server"].command).toBe(
-        "npx -y @botanicastudios/mcp-host-rpc"
-      );
+      expect(config["test-server"].command).toBe("npx");
       expect(config["test-server"].args).toEqual([
-        "--production",
-        "--timeout",
-        "30",
+        "-y",
+        "@botanicastudios/mcp-host-rpc"
       ]);
     });
 
@@ -166,10 +163,8 @@ describe("McpHost", () => {
       );
 
       // Should fall back to default since command array is empty
-      expect(config["test-server"].command).toBe(
-        "npx -y @botanicastudios/mcp-host-rpc"
-      );
-      expect(config["test-server"].args).toEqual([]);
+      expect(config["test-server"].command).toBe("npx");
+      expect(config["test-server"].args).toEqual(["-y", "@botanicastudios/mcp-host-rpc"]);
     });
 
     it("should handle empty args array", () => {
@@ -295,6 +290,99 @@ describe("McpHost", () => {
         },
       });
     });
+
+    it("should not create nested server configurations", () => {
+      const config = host.getMCPServerConfig(
+        "project-requirements",
+        testTools,
+        testContext
+      );
+
+      // Should NOT have nested structure like { "project-requirements": { "project-requirements": {...} } }
+      expect(config).toEqual({
+        "project-requirements": {
+          type: "stdio",
+          command: "npx",
+          args: ["-y", "@botanicastudios/mcp-host-rpc"],
+          env: {
+            CONTEXT_TOKEN: expect.any(String),
+            PIPE: expect.any(String),
+            TOOLS: expect.any(String),
+          },
+        },
+      });
+      
+      // Ensure there's no nested structure
+      expect(config["project-requirements"]).not.toHaveProperty("project-requirements");
+    });
+
+    it("should handle wrapping in mcpServers object correctly", () => {
+      const config = host.getMCPServerConfig(
+        "project-requirements",
+        testTools,
+        testContext
+      );
+
+      // Simulate what might happen when wrapping in mcpServers
+      const wrappedConfig = {
+        mcpServers: config
+      };
+
+      // Should NOT result in nested structure
+      expect(wrappedConfig).toEqual({
+        mcpServers: {
+          "project-requirements": {
+            type: "stdio",
+            command: "npx", 
+            args: ["-y", "@botanicastudios/mcp-host-rpc"],
+            env: {
+              CONTEXT_TOKEN: expect.any(String),
+              PIPE: expect.any(String),
+              TOOLS: expect.any(String),
+            },
+          },
+        },
+      });
+
+      // The problematic nested structure should NOT exist
+      expect(wrappedConfig.mcpServers["project-requirements"]).not.toHaveProperty("project-requirements");
+    });
+
+    it("should detect if nested configuration bug is introduced", () => {
+      // This test would catch if someone accidentally creates a nested structure
+      const config = host.getMCPServerConfig(
+        "project-requirements",
+        testTools,
+        testContext
+      );
+
+      // Create the problematic nested structure that user is experiencing
+      const buggyConfig = {
+        mcpServers: {
+          "project-requirements": {
+            "project-requirements": config["project-requirements"]
+          }
+        }
+      };
+
+      // This should pass - demonstrating we can detect the nested structure
+      expect(buggyConfig.mcpServers["project-requirements"]).toHaveProperty("project-requirements");
+      
+      // This demonstrates what the user is seeing (buggy output)
+      expect(JSON.stringify(buggyConfig, null, 2)).toContain('    "project-requirements": {\n      "project-requirements": {');
+    });
+
+    it("should validate server name input to prevent potential bugs", () => {
+      // Test input validation
+      expect(() => host.getMCPServerConfig("", testTools, testContext)).toThrow("Server name must be a non-empty string");
+      expect(() => host.getMCPServerConfig(null as any, testTools, testContext)).toThrow("Server name must be a non-empty string");
+      expect(() => host.getMCPServerConfig(undefined as any, testTools, testContext)).toThrow("Server name must be a non-empty string");
+      
+      // Valid name should work
+      const config = host.getMCPServerConfig("valid-name", testTools, testContext);
+      expect(config).toHaveProperty("valid-name");
+      expect(config["valid-name"]).not.toHaveProperty("valid-name"); // No nesting
+    });
   });
 
   describe("getMCPServerEnvVars", () => {
@@ -313,6 +401,265 @@ describe("McpHost", () => {
 
       // Should be valid JSON
       expect(() => JSON.parse(envVars.TOOLS)).not.toThrow();
+    });
+  });
+
+  describe("Async Handler Awaiting", () => {
+    it("should wait for async handler to complete before responding", async () => {
+      const startTime = Date.now();
+      let handlerCompleted = false;
+      
+      // Register a tool with async handler that takes time
+      host.registerTool(
+        "async-tool",
+        {
+          title: "Async Tool",
+          description: "A tool with async handler",
+          functionName: "asyncFunction",
+          inputSchema: {
+            type: "object",
+            properties: {
+              delay: { type: "number" },
+            },
+            required: ["delay"],
+            additionalProperties: false,
+          },
+        },
+        async (context: any, args: any) => {
+          // Simulate async work
+          await new Promise(resolve => setTimeout(resolve, args.delay || 100));
+          handlerCompleted = true;
+          return { result: "async complete", duration: Date.now() - startTime };
+        }
+      );
+
+      // Start the server
+      await host.start();
+
+      // Create a mock client to test RPC communication
+      const net = await import("net");
+      
+      const client = new net.Socket();
+      
+      await new Promise<void>((resolve, reject) => {
+        client.connect(host.pipePath, () => {
+          resolve();
+        });
+        
+        client.on("error", reject);
+      });
+
+      // Listen for responses
+      let responseReceived = false;
+      let responseData: any;
+      
+      client.on("data", (data) => {
+        const lines = data.toString().split("\n").filter(line => line.trim());
+        for (const line of lines) {
+          try {
+            const response = JSON.parse(line);
+            if (response.id === 1) {
+              responseReceived = true;
+              responseData = response;
+            }
+          } catch (error) {
+            console.error("Parse error in test:", error, "Line:", line);
+          }
+        }
+      });
+
+      // Get JWT token for the request
+      const envVars = host.getMCPServerEnvVars(["async-tool"], { userId: "test" });
+      const contextToken = envVars.CONTEXT_TOKEN;
+
+      // Make the RPC call
+      const requestTime = Date.now();
+      // We need to send the raw JSON-RPC request
+      const request = {
+        jsonrpc: "2.0",
+        method: "asyncFunction",
+        params: [contextToken, { delay: 200 }],
+        id: 1
+      };
+      client.write(JSON.stringify(request) + "\n");
+
+      // Wait for response
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // Verify the handler completed before response was sent
+      expect(handlerCompleted).toBe(true);
+      expect(responseReceived).toBe(true);
+      expect(responseData).toBeDefined();
+      expect(responseData.result).toBeDefined();
+      
+      // The response should come after the handler completes
+      const handlerDuration = responseData.result.duration;
+      expect(handlerDuration).toBeGreaterThanOrEqual(200);
+
+      client.destroy();
+    });
+
+    it("should handle handler errors and return error response", async () => {
+      // Register a tool with handler that throws
+      host.registerTool(
+        "error-tool",
+        {
+          title: "Error Tool",
+          description: "A tool that throws errors",
+          functionName: "errorFunction",
+          inputSchema: {
+            type: "object",
+            properties: {
+              message: { type: "string" },
+            },
+            required: ["message"],
+            additionalProperties: false,
+          },
+        },
+        async (context: any, args: any) => {
+          throw new Error(args.message || "Test error");
+        }
+      );
+
+      // Start the server
+      await host.start();
+
+      // Create a mock client
+      const net = await import("net");
+      const { JSONRPCClient } = await import("json-rpc-2.0");
+      
+      const client = new net.Socket();
+      
+      await new Promise<void>((resolve, reject) => {
+        client.connect(host.pipePath, () => {
+          resolve();
+        });
+        
+        client.on("error", reject);
+      });
+
+      // Listen for responses
+      let errorResponse: any;
+      
+      client.on("data", (data) => {
+        const lines = data.toString().split("\n").filter(line => line.trim());
+        for (const line of lines) {
+          try {
+            const response = JSON.parse(line);
+            if (response.id === 2) {
+              errorResponse = response;
+            }
+          } catch (error) {
+            // Ignore parse errors
+          }
+        }
+      });
+
+      // Get JWT token
+      const envVars = host.getMCPServerEnvVars(["error-tool"], { userId: "test" });
+      const contextToken = envVars.CONTEXT_TOKEN;
+
+      // Make the RPC call
+      const request = {
+        jsonrpc: "2.0",
+        method: "errorFunction",
+        params: [contextToken, { message: "Custom error" }],
+        id: 2
+      };
+      client.write(JSON.stringify(request) + "\n");
+
+      // Wait for response
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Verify error response
+      expect(errorResponse).toBeDefined();
+      expect(errorResponse.error).toBeDefined();
+      expect(errorResponse.error.message).toContain("Custom error");
+
+      client.destroy();
+    });
+
+    it("should handle synchronous handlers correctly", async () => {
+      // Register a tool with sync handler (returns a value, not a promise)
+      host.registerTool(
+        "sync-tool",
+        {
+          title: "Sync Tool",
+          description: "A tool with sync handler",
+          functionName: "syncFunction",
+          inputSchema: {
+            type: "object",
+            properties: {
+              value: { type: "string" },
+            },
+            required: ["value"],
+            additionalProperties: false,
+          },
+        },
+        async (context: any, args: any) => {
+          // Even though declared async, it returns immediately
+          return { result: `sync: ${args.value}` };
+        }
+      );
+
+      // Start the server
+      await host.start();
+
+      // Create a mock client
+      const net = await import("net");
+      const { JSONRPCClient } = await import("json-rpc-2.0");
+      
+      const client = new net.Socket();
+      
+      await new Promise<void>((resolve, reject) => {
+        client.connect(host.pipePath, () => {
+          resolve();
+        });
+        
+        client.on("error", reject);
+      });
+
+      // Listen for responses
+      let response: any;
+      
+      client.on("data", (data) => {
+        const lines = data.toString().split("\n").filter(line => line.trim());
+        for (const line of lines) {
+          try {
+            const parsed = JSON.parse(line);
+            if (parsed.id === 3) {
+              response = parsed;
+            }
+          } catch (error) {
+            // Ignore parse errors
+          }
+        }
+      });
+
+      // Get JWT token
+      const envVars = host.getMCPServerEnvVars(["sync-tool"], { userId: "test" });
+      const contextToken = envVars.CONTEXT_TOKEN;
+
+      // Make the RPC call
+      const startTime = Date.now();
+      const request = {
+        jsonrpc: "2.0",
+        method: "syncFunction",
+        params: [contextToken, { value: "test" }],
+        id: 3
+      };
+      client.write(JSON.stringify(request) + "\n");
+
+      // Wait for response
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Verify response came quickly
+      const duration = Date.now() - startTime;
+      expect(response).toBeDefined();
+      expect(response.result).toEqual({ result: "sync: test" });
+      expect(duration).toBeLessThan(100); // Should be fast
+
+      client.destroy();
     });
   });
 

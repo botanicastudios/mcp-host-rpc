@@ -41,7 +41,9 @@ socket.on("close", () => {
 });
 const send = (data) => {
     if (socket.writable) {
-        socket.write(data + "\n");
+        // Ensure data is properly stringified if it's somehow an object
+        const stringData = typeof data === 'string' ? data : JSON.stringify(data);
+        socket.write(stringData + "\n");
     }
     else {
         console.error("Socket not writable");

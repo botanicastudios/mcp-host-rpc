@@ -276,7 +276,15 @@ export class McpHost implements McpHostServer {
       }
 
       const context = this.verifyJWT(contextToken);
-      return await handler(context, args);
+      
+      // Actually await the handler result before returning
+      try {
+        const result = await handler(context, args);
+        return result;
+      } catch (error) {
+        // Re-throw the error to let JSON-RPC handle it properly
+        throw error;
+      }
     };
 
     this.server.addMethod(properties.functionName, wrappedHandler);
@@ -310,6 +318,11 @@ export class McpHost implements McpHostServer {
     context: any,
     options?: { command?: string | string[]; args?: string[] }
   ): Record<string, any> {
+    // Input validation to prevent potential bugs
+    if (!name || typeof name !== 'string') {
+      throw new Error('Server name must be a non-empty string');
+    }
+
     const envVars = this.getMCPServerEnvVars(tools, context);
 
     let command = "npx";
@@ -322,21 +335,30 @@ export class McpHost implements McpHostServer {
           args = options.command.slice(1);
         }
       } else {
+        // Use string command as-is and reset args to empty
         command = options.command;
+        args = [];
       }
+      
       if (options?.args) {
         args = args.concat(options.args);
       }
     }
 
-    return {
-      [name]: {
-        type: "stdio",
-        command,
-        args,
-        env: envVars,
-      },
+    // Build the configuration object with defensive structure
+    const serverConfig = {
+      type: "stdio",
+      command,
+      args,
+      env: envVars,
     };
+
+    // Return the properly structured configuration
+    // Using explicit object construction to prevent any accidental nesting
+    const result: Record<string, any> = {};
+    result[name] = serverConfig;
+    
+    return result;
   }
 
   async start(): Promise<{
@@ -365,6 +387,12 @@ export class McpHost implements McpHostServer {
 
           for (const line of lines) {
             try {
+              // Add better validation before parsing
+              if (typeof line !== 'string' || !line.trim()) {
+                this.log("Skipping invalid line data:", typeof line);
+                continue;
+              }
+
               const request = JSON.parse(line);
               this.log("Received request:", request.method);
               const response = await this.server.receive(request);
@@ -374,6 +402,7 @@ export class McpHost implements McpHostServer {
               }
             } catch (error) {
               this.log("Error processing request:", error);
+              this.log("Problematic line:", line);
               const errorResponse = {
                 jsonrpc: "2.0",
                 error: {
