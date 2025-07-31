@@ -212,7 +212,7 @@ export class McpHost {
         if (!name || typeof name !== 'string') {
             throw new Error('Server name must be a non-empty string');
         }
-        const envVars = this.getMCPServerEnvVars(tools, context);
+        const envVars = { ...this.getMCPServerEnvVars(tools, context) };
         let command = "npx";
         let args = ["-y", "@botanicastudios/mcp-host-rpc"];
         if (options?.command) {
@@ -230,6 +230,10 @@ export class McpHost {
             if (options?.args) {
                 args = args.concat(options.args);
             }
+        }
+        // Add DEBUG env var if debug option is enabled
+        if (options?.debug) {
+            envVars.DEBUG = "1";
         }
         // Build the configuration object with defensive structure
         const serverConfig = {

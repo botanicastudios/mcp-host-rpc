@@ -175,13 +175,13 @@ export interface McpHostServer {
   getMCPServerEnvVars(
     tools: string[],
     context: any
-  ): { CONTEXT_TOKEN: string; PIPE: string; TOOLS: string };
+  ): { CONTEXT_TOKEN: string; PIPE: string; TOOLS: string; DEBUG?: string };
   /** Get complete MCP client configuration */
   getMCPServerConfig(
     name: string,
     tools: string[],
     context: any,
-    options?: { command?: string | string[]; args?: string[] }
+    options?: { command?: string | string[]; args?: string[]; debug?: boolean }
   ): Record<string, any>;
   /** Start the RPC server */
   start(): Promise<{
@@ -294,7 +294,7 @@ export class McpHost implements McpHostServer {
   getMCPServerEnvVars(
     tools: string[],
     context: any
-  ): { CONTEXT_TOKEN: string; PIPE: string; TOOLS: string } {
+  ): { CONTEXT_TOKEN: string; PIPE: string; TOOLS: string; DEBUG?: string } {
     // Filter tools config to only include requested tools
     const filteredTools: Record<string, any> = {};
     for (const toolName of tools) {
@@ -316,14 +316,14 @@ export class McpHost implements McpHostServer {
     name: string,
     tools: string[],
     context: any,
-    options?: { command?: string | string[]; args?: string[] }
+    options?: { command?: string | string[]; args?: string[]; debug?: boolean }
   ): Record<string, any> {
     // Input validation to prevent potential bugs
     if (!name || typeof name !== 'string') {
       throw new Error('Server name must be a non-empty string');
     }
 
-    const envVars = this.getMCPServerEnvVars(tools, context);
+    const envVars = { ...this.getMCPServerEnvVars(tools, context) };
 
     let command = "npx";
     let args: string[] = ["-y", "@botanicastudios/mcp-host-rpc"];
@@ -343,6 +343,11 @@ export class McpHost implements McpHostServer {
       if (options?.args) {
         args = args.concat(options.args);
       }
+    }
+
+    // Add DEBUG env var if debug option is enabled
+    if (options?.debug) {
+      envVars.DEBUG = "1";
     }
 
     // Build the configuration object with defensive structure

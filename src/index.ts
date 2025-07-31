@@ -5,10 +5,24 @@ import { z } from "zod";
 import { JSONRPCClient } from "json-rpc-2.0";
 import * as net from "net";
 
+// Check if debug mode is enabled
+const DEBUG = !!process.env.DEBUG;
+
+// Debug logging function
+function debug(message: string, ...args: any[]): void {
+  if (DEBUG) {
+    console.error(`[MCP-RPC-Bridge] ${message}`, ...args);
+  }
+}
+
 // Parse environment variables
 const contextToken = process.env.CONTEXT_TOKEN;
 const toolsConfig = process.env.TOOLS;
 const pipeAddress = process.env.PIPE;
+
+debug("Starting MCP RPC Bridge");
+debug("Debug mode enabled");
+debug("Pipe address:", pipeAddress);
 
 if (!contextToken) {
   throw new Error("CONTEXT_TOKEN environment variable is required");
@@ -26,6 +40,7 @@ if (!pipeAddress) {
 let tools: Record<string, any>;
 try {
   tools = JSON.parse(toolsConfig);
+  debug("Loaded tools configuration:", Object.keys(tools));
 } catch (error) {
   throw new Error("TOOLS must be valid JSON");
 }
@@ -35,16 +50,16 @@ let rpcClient: JSONRPCClient;
 const socket = net.createConnection(pipeAddress);
 
 socket.on("connect", () => {
-  console.error("Connected to parent app via pipe");
+  debug("Connected to parent app via pipe");
 });
 
 socket.on("error", (error) => {
-  console.error("Socket error:", error);
+  debug("Socket error:", error);
   process.exit(1);
 });
 
 socket.on("close", () => {
-  console.error("Socket connection closed");
+  debug("Socket connection closed");
   process.exit(1);
 });
 
@@ -52,13 +67,28 @@ const send = (data: string) => {
   if (socket.writable) {
     // Ensure data is properly stringified if it's somehow an object
     const stringData = typeof data === 'string' ? data : JSON.stringify(data);
+    debug("Sending RPC request:", stringData);
     socket.write(stringData + "\n");
   } else {
-    console.error("Socket not writable");
+    debug("Socket not writable");
   }
 };
 
 rpcClient = new JSONRPCClient(send);
+
+// Handle incoming RPC responses
+socket.on("data", (data) => {
+  const lines = data.toString().split("\n").filter(line => line.trim());
+  for (const line of lines) {
+    try {
+      const response = JSON.parse(line);
+      debug("Received RPC response:", response);
+      rpcClient.receive(response);
+    } catch (error) {
+      debug("Error parsing RPC response:", error);
+    }
+  }
+});
 
 // Create an MCP server
 const server = new McpServer({
@@ -123,6 +153,8 @@ function createInputSchema(schema: any): Record<string, z.ZodType<any>> {
 for (const [toolName, toolConfig] of Object.entries(tools)) {
   const inputSchema = createInputSchema(toolConfig.inputSchema);
 
+  debug(`Registering tool: ${toolName} -> ${toolConfig.functionName}`);
+
   server.registerTool(
     toolName,
     {
@@ -131,16 +163,19 @@ for (const [toolName, toolConfig] of Object.entries(tools)) {
       inputSchema: inputSchema,
     },
     async (args) => {
+      debug(`Tool called: ${toolName} with args:`, args);
       try {
         // Make RPC call to parent app
         const result = await rpcClient.request(toolConfig.functionName, [
           contextToken,
           args,
         ]);
+        debug(`Tool ${toolName} response:`, result);
         return { content: result };
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : String(error);
+        debug(`Tool ${toolName} error:`, errorMessage);
         return {
           content: [
             {
@@ -156,4 +191,6 @@ for (const [toolName, toolConfig] of Object.entries(tools)) {
 
 // Start receiving messages on stdin and sending messages on stdout
 const transport = new StdioServerTransport();
+debug("Starting MCP server with stdio transport");
 await server.connect(transport);
+debug("MCP server connected and ready");

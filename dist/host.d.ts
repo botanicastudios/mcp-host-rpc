@@ -38,11 +38,13 @@ export interface McpHostServer {
         CONTEXT_TOKEN: string;
         PIPE: string;
         TOOLS: string;
+        DEBUG?: string;
     };
     /** Get complete MCP client configuration */
     getMCPServerConfig(name: string, tools: string[], context: any, options?: {
         command?: string | string[];
         args?: string[];
+        debug?: boolean;
     }): Record<string, any>;
     /** Start the RPC server */
     start(): Promise<{
@@ -72,10 +74,12 @@ export declare class McpHost implements McpHostServer {
         CONTEXT_TOKEN: string;
         PIPE: string;
         TOOLS: string;
+        DEBUG?: string;
     };
     getMCPServerConfig(name: string, tools: string[], context: any, options?: {
         command?: string | string[];
         args?: string[];
+        debug?: boolean;
     }): Record<string, any>;
     start(): Promise<{
         secret: string;

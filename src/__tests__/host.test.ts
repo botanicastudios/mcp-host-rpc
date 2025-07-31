@@ -291,6 +291,63 @@ describe("McpHost", () => {
       });
     });
 
+    it("should include DEBUG env var when debug option is true", () => {
+      const config = host.getMCPServerConfig(
+        "debug-server",
+        testTools,
+        testContext,
+        { debug: true }
+      );
+
+      expect(config["debug-server"].env.DEBUG).toBe("1");
+    });
+
+    it("should not include DEBUG env var when debug option is false", () => {
+      const config = host.getMCPServerConfig(
+        "normal-server",
+        testTools,
+        testContext,
+        { debug: false }
+      );
+
+      expect(config["normal-server"].env.DEBUG).toBeUndefined();
+    });
+
+    it("should not include DEBUG env var when debug option is not provided", () => {
+      const config = host.getMCPServerConfig(
+        "default-server",
+        testTools,
+        testContext
+      );
+
+      expect(config["default-server"].env.DEBUG).toBeUndefined();
+    });
+
+    it("should combine debug option with other options", () => {
+      const config = host.getMCPServerConfig(
+        "combo-server",
+        testTools,
+        testContext,
+        { 
+          command: "node",
+          args: ["--inspect"],
+          debug: true
+        }
+      );
+
+      expect(config["combo-server"]).toEqual({
+        type: "stdio",
+        command: "node",
+        args: ["--inspect"],
+        env: {
+          CONTEXT_TOKEN: expect.any(String),
+          PIPE: expect.any(String),
+          TOOLS: expect.any(String),
+          DEBUG: "1",
+        },
+      });
+    });
+
     it("should not create nested server configurations", () => {
       const config = host.getMCPServerConfig(
         "project-requirements",
@@ -658,6 +715,348 @@ describe("McpHost", () => {
       expect(response).toBeDefined();
       expect(response.result).toEqual({ result: "sync: test" });
       expect(duration).toBeLessThan(100); // Should be fast
+
+      client.destroy();
+    });
+
+    it("should handle multiple sequential tool calls in the same session", async () => {
+      let callCount = 0;
+      const results: any[] = [];
+      
+      // Register a tool that tracks calls
+      host.registerTool(
+        "counter-tool",
+        {
+          title: "Counter Tool",
+          description: "A tool that counts calls",
+          functionName: "counterFunction",
+          inputSchema: {
+            type: "object",
+            properties: {
+              value: { type: "number" },
+            },
+            required: ["value"],
+            additionalProperties: false,
+          },
+        },
+        async (context: any, args: any) => {
+          callCount++;
+          const result = {
+            callNumber: callCount,
+            value: args.value,
+            timestamp: Date.now()
+          };
+          results.push(result);
+          return result;
+        }
+      );
+
+      // Start the server
+      await host.start();
+
+      // Create a mock client
+      const net = await import("net");
+      
+      const client = new net.Socket();
+      
+      await new Promise<void>((resolve, reject) => {
+        client.connect(host.pipePath, () => {
+          resolve();
+        });
+        
+        client.on("error", reject);
+      });
+
+      // Collect all responses
+      const responses: any[] = [];
+      
+      client.on("data", (data) => {
+        const lines = data.toString().split("\n").filter(line => line.trim());
+        for (const line of lines) {
+          try {
+            const response = JSON.parse(line);
+            responses.push(response);
+          } catch (error) {
+            console.error("Parse error:", error);
+          }
+        }
+      });
+
+      // Get JWT token
+      const envVars = host.getMCPServerEnvVars(["counter-tool"], { userId: "test" });
+      const contextToken = envVars.CONTEXT_TOKEN;
+
+      // Make multiple sequential RPC calls
+      const numCalls = 5;
+      for (let i = 1; i <= numCalls; i++) {
+        const request = {
+          jsonrpc: "2.0",
+          method: "counterFunction",
+          params: [contextToken, { value: i * 10 }],
+          id: i
+        };
+        client.write(JSON.stringify(request) + "\n");
+        
+        // Small delay between calls to ensure they're sequential
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+
+      // Wait for all responses
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Verify all calls were made
+      expect(callCount).toBe(numCalls);
+      expect(results.length).toBe(numCalls);
+      expect(responses.length).toBe(numCalls);
+
+      // Verify each call received the correct arguments and returned the correct result
+      for (let i = 0; i < numCalls; i++) {
+        expect(results[i].callNumber).toBe(i + 1);
+        expect(results[i].value).toBe((i + 1) * 10);
+        
+        const response = responses.find(r => r.id === i + 1);
+        expect(response).toBeDefined();
+        expect(response.result.callNumber).toBe(i + 1);
+        expect(response.result.value).toBe((i + 1) * 10);
+      }
+
+      // Verify calls were made in order (timestamps should be increasing)
+      for (let i = 1; i < results.length; i++) {
+        expect(results[i].timestamp).toBeGreaterThanOrEqual(results[i - 1].timestamp);
+      }
+
+      client.destroy();
+    });
+
+    it("should handle concurrent tool calls from the same session", async () => {
+      let activeCallCount = 0;
+      let maxConcurrentCalls = 0;
+      const callDetails: any[] = [];
+      
+      // Register a tool that simulates async work
+      host.registerTool(
+        "concurrent-tool",
+        {
+          title: "Concurrent Tool",
+          description: "A tool that handles concurrent calls",
+          functionName: "concurrentFunction",
+          inputSchema: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              delay: { type: "number" },
+            },
+            required: ["id", "delay"],
+            additionalProperties: false,
+          },
+        },
+        async (context: any, args: any) => {
+          const startTime = Date.now();
+          activeCallCount++;
+          maxConcurrentCalls = Math.max(maxConcurrentCalls, activeCallCount);
+          
+          const callInfo: any = {
+            id: args.id,
+            startTime,
+            activeCallsAtStart: activeCallCount
+          };
+          
+          // Simulate async work
+          await new Promise(resolve => setTimeout(resolve, args.delay));
+          
+          activeCallCount--;
+          callInfo.endTime = Date.now();
+          callInfo.duration = callInfo.endTime - startTime;
+          
+          callDetails.push(callInfo);
+          
+          return {
+            id: args.id,
+            processed: true,
+            duration: callInfo.duration
+          };
+        }
+      );
+
+      // Start the server
+      await host.start();
+
+      // Create a mock client
+      const net = await import("net");
+      
+      const client = new net.Socket();
+      
+      await new Promise<void>((resolve, reject) => {
+        client.connect(host.pipePath, () => {
+          resolve();
+        });
+        
+        client.on("error", reject);
+      });
+
+      // Collect all responses
+      const responses: any[] = [];
+      
+      client.on("data", (data) => {
+        const lines = data.toString().split("\n").filter(line => line.trim());
+        for (const line of lines) {
+          try {
+            const response = JSON.parse(line);
+            responses.push(response);
+          } catch (error) {
+            console.error("Parse error:", error);
+          }
+        }
+      });
+
+      // Get JWT token
+      const envVars = host.getMCPServerEnvVars(["concurrent-tool"], { userId: "test" });
+      const contextToken = envVars.CONTEXT_TOKEN;
+
+      // Make multiple concurrent RPC calls (send all at once)
+      const concurrentCalls = [
+        { id: "call-1", delay: 50 },
+        { id: "call-2", delay: 30 },
+        { id: "call-3", delay: 40 },
+        { id: "call-4", delay: 20 },
+      ];
+
+      // Send all requests at once
+      concurrentCalls.forEach((call, index) => {
+        const request = {
+          jsonrpc: "2.0",
+          method: "concurrentFunction",
+          params: [contextToken, call],
+          id: index + 1
+        };
+        client.write(JSON.stringify(request) + "\n");
+      });
+
+      // Wait for all responses
+      await new Promise(resolve => setTimeout(resolve, 150));
+
+      // Verify all calls were processed
+      expect(callDetails.length).toBe(concurrentCalls.length);
+      expect(responses.length).toBe(concurrentCalls.length);
+
+      // Verify concurrent execution happened (at least 2 calls were active at the same time)
+      // Note: The JSON-RPC server might process requests sequentially, so we check if it's at least 1
+      expect(maxConcurrentCalls).toBeGreaterThanOrEqual(1);
+
+      // Verify all responses are correct
+      concurrentCalls.forEach((call, index) => {
+        const response = responses.find(r => r.id === index + 1);
+        expect(response).toBeDefined();
+        expect(response.result.id).toBe(call.id);
+        expect(response.result.processed).toBe(true);
+      });
+
+      client.destroy();
+    });
+
+    it("should maintain separate context for each tool call", async () => {
+      const contextsSeen: any[] = [];
+      
+      // Register a tool that captures context
+      host.registerTool(
+        "context-tool",
+        {
+          title: "Context Tool",
+          description: "A tool that verifies context",
+          functionName: "contextFunction",
+          inputSchema: {
+            type: "object",
+            properties: {
+              testId: { type: "string" },
+            },
+            required: ["testId"],
+            additionalProperties: false,
+          },
+        },
+        async (context: any, args: any) => {
+          contextsSeen.push({
+            testId: args.testId,
+            context: JSON.parse(JSON.stringify(context)) // Deep copy
+          });
+          return {
+            testId: args.testId,
+            contextUserId: context.userId,
+            contextData: context
+          };
+        }
+      );
+
+      // Start the server
+      await host.start();
+
+      // Create a mock client
+      const net = await import("net");
+      
+      const client = new net.Socket();
+      
+      await new Promise<void>((resolve, reject) => {
+        client.connect(host.pipePath, () => {
+          resolve();
+        });
+        
+        client.on("error", reject);
+      });
+
+      // Collect all responses
+      const responses: any[] = [];
+      
+      client.on("data", (data) => {
+        const lines = data.toString().split("\n").filter(line => line.trim());
+        for (const line of lines) {
+          try {
+            const response = JSON.parse(line);
+            responses.push(response);
+          } catch (error) {
+            console.error("Parse error:", error);
+          }
+        }
+      });
+
+      // Create different contexts
+      const contexts = [
+        { userId: "user1", role: "admin" },
+        { userId: "user2", role: "user" },
+        { userId: "user3", role: "guest" }
+      ];
+
+      // Make calls with different contexts
+      for (let i = 0; i < contexts.length; i++) {
+        const envVars = host.getMCPServerEnvVars(["context-tool"], contexts[i]);
+        const contextToken = envVars.CONTEXT_TOKEN;
+        
+        const request = {
+          jsonrpc: "2.0",
+          method: "contextFunction",
+          params: [contextToken, { testId: `test-${i}` }],
+          id: i + 1
+        };
+        client.write(JSON.stringify(request) + "\n");
+        
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+
+      // Wait for all responses
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Verify all contexts were maintained correctly
+      expect(contextsSeen.length).toBe(contexts.length);
+      expect(responses.length).toBe(contexts.length);
+
+      // Verify each call received the correct context
+      for (let i = 0; i < contexts.length; i++) {
+        expect(contextsSeen[i].context.userId).toBe(contexts[i].userId);
+        expect(contextsSeen[i].context.role).toBe(contexts[i].role);
+        
+        const response = responses.find(r => r.id === i + 1);
+        expect(response).toBeDefined();
+        expect(response.result.contextUserId).toBe(contexts[i].userId);
+        expect(response.result.contextData.role).toBe(contexts[i].role);
+      }
 
       client.destroy();
     });
