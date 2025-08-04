@@ -54,7 +54,7 @@ socket.on("close", () => {
 const send = (data) => {
     if (socket.writable) {
         // Ensure data is properly stringified if it's somehow an object
-        const stringData = typeof data === 'string' ? data : JSON.stringify(data);
+        const stringData = typeof data === "string" ? data : JSON.stringify(data);
         debug("Sending RPC request:", stringData);
         socket.write(stringData + "\n");
     }
@@ -65,7 +65,10 @@ const send = (data) => {
 rpcClient = new JSONRPCClient(send);
 // Handle incoming RPC responses
 socket.on("data", (data) => {
-    const lines = data.toString().split("\n").filter(line => line.trim());
+    const lines = data
+        .toString()
+        .split("\n")
+        .filter((line) => line.trim());
     for (const line of lines) {
         try {
             const response = JSON.parse(line);
@@ -152,7 +155,18 @@ for (const [toolName, toolConfig] of Object.entries(tools)) {
                 args,
             ]);
             debug(`Tool ${toolName} response:`, result);
-            return { content: result };
+            if (typeof result === "string") {
+                return { content: [{ type: "text", text: result }] };
+            }
+            else if (Array.isArray(result)) {
+                return { content: result };
+            }
+            else if (result && typeof result === "object" && "type" in result) {
+                return { content: [result] };
+            }
+            else {
+                return { content: [{ type: "text", text: JSON.stringify(result) }] };
+            }
         }
         catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);

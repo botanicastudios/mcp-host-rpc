@@ -259,18 +259,22 @@ export class McpHost {
         return new Promise((resolve, reject) => {
             this.socketServer = net.createServer((socket) => {
                 this.log("Client connected");
+                // Buffer to accumulate incoming data
+                let buffer = "";
                 socket.on("data", async (data) => {
-                    const lines = data
-                        .toString()
-                        .split("\n")
-                        .filter((line) => line.trim());
-                    for (const line of lines) {
+                    // Append incoming data to buffer
+                    buffer += data.toString();
+                    // Process all complete messages (delimited by newlines)
+                    let newlineIndex;
+                    while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+                        // Extract the complete message
+                        const line = buffer.substring(0, newlineIndex);
+                        buffer = buffer.substring(newlineIndex + 1);
+                        // Skip empty lines
+                        if (!line.trim()) {
+                            continue;
+                        }
                         try {
-                            // Add better validation before parsing
-                            if (typeof line !== 'string' || !line.trim()) {
-                                this.log("Skipping invalid line data:", typeof line);
-                                continue;
-                            }
                             const request = JSON.parse(line);
                             this.log("Received request:", request.method);
                             const response = await this.server.receive(request);
@@ -296,6 +300,8 @@ export class McpHost {
                 });
                 socket.on("close", () => {
                     this.log("Client disconnected");
+                    // Clear the buffer when socket closes
+                    buffer = "";
                 });
                 socket.on("error", (error) => {
                     this.log("Socket error:", error);
