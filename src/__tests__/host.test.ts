@@ -194,6 +194,7 @@ describe("McpHost", () => {
         CONTEXT_TOKEN: expect.any(String),
         PIPE: expect.any(String),
         TOOLS: expect.any(String),
+        TRANSPORT_MODE: "socket",
       });
 
       // Verify TOOLS contains our test tool
@@ -286,6 +287,7 @@ describe("McpHost", () => {
             CONTEXT_TOKEN: expect.any(String),
             PIPE: expect.any(String),
             TOOLS: expect.any(String),
+            TRANSPORT_MODE: "socket",
           },
         },
       });
@@ -343,6 +345,7 @@ describe("McpHost", () => {
           CONTEXT_TOKEN: expect.any(String),
           PIPE: expect.any(String),
           TOOLS: expect.any(String),
+          TRANSPORT_MODE: "socket",
           DEBUG: "1",
         },
       });
@@ -365,6 +368,7 @@ describe("McpHost", () => {
             CONTEXT_TOKEN: expect.any(String),
             PIPE: expect.any(String),
             TOOLS: expect.any(String),
+            TRANSPORT_MODE: "socket",
           },
         },
       });
@@ -396,6 +400,7 @@ describe("McpHost", () => {
               CONTEXT_TOKEN: expect.any(String),
               PIPE: expect.any(String),
               TOOLS: expect.any(String),
+              TRANSPORT_MODE: "socket",
             },
           },
         },

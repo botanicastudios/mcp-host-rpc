@@ -6,6 +6,8 @@
  * of Unix domain sockets, JSON-RPC server setup, JWT-based authentication with context
  * scoping, and provides elegant callback registration for RPC functions.
  */
+import { JSONRPCServer } from "json-rpc-2.0";
+import type { IncomingMessage, ServerResponse } from "http";
 export interface ToolProperties {
     title: string;
     description: string;
@@ -29,6 +31,12 @@ export interface McpHostOptions {
     start?: boolean;
     /** Whether to log debug information */
     debug?: boolean;
+    /** Transport mode: 'socket' (default) or 'http' */
+    transport?: 'socket' | 'http';
+    /** Path for HTTP endpoint (e.g., '/mcp-rpc') - required for HTTP transport */
+    httpPath?: string;
+    /** Full HTTP URL for the endpoint (optional, for getMCPServerEnvVars) */
+    httpUrl?: string;
 }
 export interface McpHostServer {
     /** Register an RPC tool with context-based handler */
@@ -36,7 +44,9 @@ export interface McpHostServer {
     /** Get environment variables for MCP server instance */
     getMCPServerEnvVars(tools: string[], context: any): {
         CONTEXT_TOKEN: string;
-        PIPE: string;
+        PIPE?: string;
+        RPC_API_URL?: string;
+        TRANSPORT_MODE: string;
         TOOLS: string;
         DEBUG?: string;
     };
@@ -54,6 +64,14 @@ export interface McpHostServer {
     }>;
     /** Stop the RPC server */
     stop(): Promise<void>;
+    /** Handle HTTP requests (only for HTTP transport) */
+    handleHttpRequest?(req: IncomingMessage | {
+        body: any;
+        headers: any;
+    }, res: ServerResponse | {
+        status: Function;
+        json: Function;
+    }): Promise<void>;
 }
 export declare class McpHost implements McpHostServer {
     private server;
@@ -64,15 +82,22 @@ export declare class McpHost implements McpHostServer {
     private rpcHandlers;
     private toolsConfig;
     private isStarted;
+    private transport;
+    private transportMode;
+    private httpPath?;
+    private httpUrl?;
     constructor(options?: McpHostOptions);
     private generateAuthToken;
     private log;
+    get rpcServer(): JSONRPCServer;
     private createJWT;
-    private verifyJWT;
+    verifyJWT(token: string): any;
     registerTool(toolName: string, properties: ToolProperties, handler: RpcHandler): void;
     getMCPServerEnvVars(tools: string[], context: any): {
         CONTEXT_TOKEN: string;
-        PIPE: string;
+        PIPE?: string;
+        RPC_API_URL?: string;
+        TRANSPORT_MODE: string;
         TOOLS: string;
         DEBUG?: string;
     };
@@ -87,6 +112,14 @@ export declare class McpHost implements McpHostServer {
         toolsConfig: Record<string, ToolProperties>;
     }>;
     stop(): Promise<void>;
+    handleHttpRequest(req: IncomingMessage | {
+        body: any;
+        headers: any;
+    }, res: ServerResponse | {
+        status: Function;
+        json: Function;
+    }): Promise<void>;
+    private getHttpUrl;
 }
 export declare function createMcpHost(options?: McpHostOptions): McpHostServer;
 //# sourceMappingURL=host.d.ts.map

@@ -15,18 +15,23 @@ function debug(message, ...args) {
 // Parse environment variables
 const contextToken = process.env.CONTEXT_TOKEN;
 const toolsConfig = process.env.TOOLS;
+const transportMode = process.env.TRANSPORT_MODE || 'socket';
 const pipeAddress = process.env.PIPE;
+const rpcApiUrl = process.env.RPC_API_URL;
 debug("Starting MCP RPC Bridge");
 debug("Debug mode enabled");
-debug("Pipe address:", pipeAddress);
+debug("Transport mode:", transportMode);
 if (!contextToken) {
     throw new Error("CONTEXT_TOKEN environment variable is required");
 }
 if (!toolsConfig) {
     throw new Error("TOOLS environment variable is required");
 }
-if (!pipeAddress) {
-    throw new Error("PIPE environment variable is required");
+if (transportMode === 'socket' && !pipeAddress) {
+    throw new Error("PIPE environment variable is required for socket mode");
+}
+if (transportMode === 'http' && !rpcApiUrl) {
+    throw new Error("RPC_API_URL environment variable is required for HTTP mode");
 }
 // Parse tools configuration
 let tools;
@@ -37,49 +42,100 @@ try {
 catch (error) {
     throw new Error("TOOLS must be valid JSON");
 }
-// Create RPC client
+// Create RPC client based on transport mode
 let rpcClient;
-const socket = net.createConnection(pipeAddress);
-socket.on("connect", () => {
-    debug("Connected to parent app via pipe");
-});
-socket.on("error", (error) => {
-    debug("Socket error:", error);
-    process.exit(1);
-});
-socket.on("close", () => {
-    debug("Socket connection closed");
-    process.exit(1);
-});
-const send = (data) => {
-    if (socket.writable) {
-        // Ensure data is properly stringified if it's somehow an object
-        const stringData = typeof data === "string" ? data : JSON.stringify(data);
-        debug("Sending RPC request:", stringData);
-        socket.write(stringData + "\n");
-    }
-    else {
-        debug("Socket not writable");
-    }
-};
-rpcClient = new JSONRPCClient(send);
-// Handle incoming RPC responses
-socket.on("data", (data) => {
-    const lines = data
-        .toString()
-        .split("\n")
-        .filter((line) => line.trim());
-    for (const line of lines) {
+if (transportMode === 'http') {
+    // HTTP transport implementation
+    debug("Initializing HTTP transport");
+    debug("RPC API URL:", rpcApiUrl);
+    const send = async (data) => {
         try {
-            const response = JSON.parse(line);
-            debug("Received RPC response:", response);
-            rpcClient.receive(response);
+            const response = await fetch(rpcApiUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${contextToken}`,
+                },
+                body: data,
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            const responseText = await response.text();
+            debug("Received HTTP response:", responseText);
+            // Parse and receive the response
+            try {
+                const jsonResponse = JSON.parse(responseText);
+                rpcClient.receive(jsonResponse);
+            }
+            catch (error) {
+                debug("Error parsing HTTP response:", error);
+            }
         }
         catch (error) {
-            debug("Error parsing RPC response:", error);
+            debug("HTTP request error:", error);
+            // Create an error response for the RPC client
+            rpcClient.receive({
+                jsonrpc: "2.0",
+                error: {
+                    code: -32603,
+                    message: "Internal error",
+                    data: error instanceof Error ? error.message : String(error),
+                },
+                id: null,
+            });
         }
-    }
-});
+    };
+    rpcClient = new JSONRPCClient(send);
+    debug("HTTP RPC client initialized");
+}
+else {
+    // Socket transport implementation (existing code)
+    debug("Initializing socket transport");
+    debug("Pipe address:", pipeAddress);
+    const socket = net.createConnection(pipeAddress);
+    socket.on("connect", () => {
+        debug("Connected to parent app via pipe");
+    });
+    socket.on("error", (error) => {
+        debug("Socket error:", error);
+        process.exit(1);
+    });
+    socket.on("close", () => {
+        debug("Socket connection closed");
+        process.exit(1);
+    });
+    const send = (data) => {
+        if (socket.writable) {
+            // Ensure data is properly stringified if it's somehow an object
+            const stringData = typeof data === "string" ? data : JSON.stringify(data);
+            debug("Sending RPC request:", stringData);
+            socket.write(stringData + "\n");
+        }
+        else {
+            debug("Socket not writable");
+        }
+    };
+    rpcClient = new JSONRPCClient(send);
+    // Handle incoming RPC responses
+    socket.on("data", (data) => {
+        const lines = data
+            .toString()
+            .split("\n")
+            .filter((line) => line.trim());
+        for (const line of lines) {
+            try {
+                const response = JSON.parse(line);
+                debug("Received RPC response:", response);
+                rpcClient.receive(response);
+            }
+            catch (error) {
+                debug("Error parsing RPC response:", error);
+            }
+        }
+    });
+    debug("Socket RPC client initialized");
+}
 // Create an MCP server
 const server = new McpServer({
     name: "rpc-bridge-server",

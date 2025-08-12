@@ -15,6 +15,8 @@ import * as os from "os";
 import * as crypto from "crypto";
 // @ts-ignore - jsonwebtoken types may not be available in all environments
 import jwt from "jsonwebtoken";
+import { Transport, SocketTransport, HttpTransport } from "./transports.js";
+import type { IncomingMessage, ServerResponse } from "http";
 
 /**
  * Check if an object is a Zod schema
@@ -162,6 +164,12 @@ export interface McpHostOptions {
   start?: boolean;
   /** Whether to log debug information */
   debug?: boolean;
+  /** Transport mode: 'socket' (default) or 'http' */
+  transport?: 'socket' | 'http';
+  /** Path for HTTP endpoint (e.g., '/mcp-rpc') - required for HTTP transport */
+  httpPath?: string;
+  /** Full HTTP URL for the endpoint (optional, for getMCPServerEnvVars) */
+  httpUrl?: string;
 }
 
 export interface McpHostServer {
@@ -175,7 +183,7 @@ export interface McpHostServer {
   getMCPServerEnvVars(
     tools: string[],
     context: any
-  ): { CONTEXT_TOKEN: string; PIPE: string; TOOLS: string; DEBUG?: string };
+  ): { CONTEXT_TOKEN: string; PIPE?: string; RPC_API_URL?: string; TRANSPORT_MODE: string; TOOLS: string; DEBUG?: string };
   /** Get complete MCP client configuration */
   getMCPServerConfig(
     name: string,
@@ -191,6 +199,11 @@ export interface McpHostServer {
   }>;
   /** Stop the RPC server */
   stop(): Promise<void>;
+  /** Handle HTTP requests (only for HTTP transport) */
+  handleHttpRequest?(
+    req: IncomingMessage | { body: any; headers: any },
+    res: ServerResponse | { status: Function; json: Function }
+  ): Promise<void>;
 }
 
 export class McpHost implements McpHostServer {
@@ -202,16 +215,38 @@ export class McpHost implements McpHostServer {
   private rpcHandlers: Map<string, RpcHandler> = new Map();
   private toolsConfig: Record<string, ToolProperties> = {};
   private isStarted = false;
+  private transport: Transport;
+  private transportMode: 'socket' | 'http';
+  private httpPath?: string;
+  private httpUrl?: string;
 
   constructor(options: McpHostOptions = {}) {
     this.server = new JSONRPCServer();
     this.secret = options.secret || this.generateAuthToken();
     this.debug = options.debug ?? false;
+    this.transportMode = options.transport || 'socket';
+    this.httpPath = options.httpPath;
+    this.httpUrl = options.httpUrl;
 
-    // Always use Unix socket, generate path if not provided
+    // Always use Unix socket for socket transport, generate path if not provided
     const tempDir = os.tmpdir();
     this.pipePath =
       options.pipePath || path.join(tempDir, `mcp-pipe-${Date.now()}.sock`);
+
+    // Create appropriate transport
+    if (this.transportMode === 'http') {
+      if (!this.httpPath) {
+        throw new Error('httpPath is required for HTTP transport');
+      }
+      this.transport = new HttpTransport(this, this.httpPath, {
+        debug: this.debug,
+        httpUrl: this.httpUrl
+      });
+    } else {
+      this.transport = new SocketTransport(this, this.pipePath, {
+        debug: this.debug
+      });
+    }
 
     // Auto-start if requested
     if (options.start) {
@@ -231,11 +266,16 @@ export class McpHost implements McpHostServer {
     }
   }
 
+  // Make server accessible to transports
+  get rpcServer(): JSONRPCServer {
+    return this.server;
+  }
+
   private createJWT(context: any): string {
     return jwt.sign({ context }, this.secret, { noTimestamp: true });
   }
 
-  private verifyJWT(token: string): any {
+  verifyJWT(token: string): any {
     try {
       const decoded = jwt.verify(token, this.secret) as any;
       return decoded.context;
@@ -294,7 +334,7 @@ export class McpHost implements McpHostServer {
   getMCPServerEnvVars(
     tools: string[],
     context: any
-  ): { CONTEXT_TOKEN: string; PIPE: string; TOOLS: string; DEBUG?: string } {
+  ): { CONTEXT_TOKEN: string; PIPE?: string; RPC_API_URL?: string; TRANSPORT_MODE: string; TOOLS: string; DEBUG?: string } {
     // Filter tools config to only include requested tools
     const filteredTools: Record<string, any> = {};
     for (const toolName of tools) {
@@ -304,12 +344,23 @@ export class McpHost implements McpHostServer {
     }
 
     const contextToken = this.createJWT(context);
-
-    return {
+    const baseVars: any = {
       CONTEXT_TOKEN: contextToken,
-      PIPE: this.pipePath,
       TOOLS: JSON.stringify(filteredTools),
+      TRANSPORT_MODE: this.transportMode,
     };
+
+    if (this.transportMode === 'http') {
+      baseVars.RPC_API_URL = this.getHttpUrl();
+    } else {
+      baseVars.PIPE = this.pipePath;
+    }
+
+    if (this.debug) {
+      baseVars.DEBUG = '1';
+    }
+
+    return baseVars;
   }
 
   getMCPServerConfig(
@@ -375,125 +426,48 @@ export class McpHost implements McpHostServer {
       throw new Error("Server is already started");
     }
 
-    // Clean up existing socket file
-    if (fs.existsSync(this.pipePath)) {
-      fs.unlinkSync(this.pipePath);
-    }
+    await this.transport.start();
+    this.isStarted = true;
+    
+    this.log("RPC server started with", this.transportMode, "transport");
+    this.log("Available tools:", Object.keys(this.toolsConfig));
 
-    return new Promise((resolve, reject) => {
-      this.socketServer = net.createServer((socket) => {
-        this.log("Client connected");
-        
-        // Buffer to accumulate incoming data
-        let buffer = "";
-
-        socket.on("data", async (data) => {
-          // Append incoming data to buffer
-          buffer += data.toString();
-          
-          // Process all complete messages (delimited by newlines)
-          let newlineIndex;
-          while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
-            // Extract the complete message
-            const line = buffer.substring(0, newlineIndex);
-            buffer = buffer.substring(newlineIndex + 1);
-            
-            // Skip empty lines
-            if (!line.trim()) {
-              continue;
-            }
-
-            try {
-              const request = JSON.parse(line);
-              this.log("Received request:", request.method);
-              const response = await this.server.receive(request);
-
-              if (response) {
-                socket.write(JSON.stringify(response) + "\n");
-              }
-            } catch (error) {
-              this.log("Error processing request:", error);
-              this.log("Problematic line:", line);
-              const errorResponse = {
-                jsonrpc: "2.0",
-                error: {
-                  code: -32700,
-                  message: "Parse error",
-                  data: error instanceof Error ? error.message : String(error),
-                },
-                id: null,
-              };
-              socket.write(JSON.stringify(errorResponse) + "\n");
-            }
-          }
-        });
-
-        socket.on("close", () => {
-          this.log("Client disconnected");
-          // Clear the buffer when socket closes
-          buffer = "";
-        });
-
-        socket.on("error", (error) => {
-          this.log("Socket error:", error);
-        });
-      });
-
-      const listenCallback = () => {
-        this.isStarted = true;
-        this.log("RPC server started");
-        this.log("Available tools:", Object.keys(this.toolsConfig));
-
-        resolve({
-          secret: this.secret,
-          pipePath: this.pipePath,
-          toolsConfig: this.toolsConfig,
-        });
-      };
-
-      this.socketServer.on("error", (error) => {
-        reject(error);
-      });
-
-      this.socketServer.listen(this.pipePath, listenCallback);
-    });
+    return {
+      secret: this.secret,
+      pipePath: this.pipePath,
+      toolsConfig: this.toolsConfig,
+    };
   }
 
   async stop(): Promise<void> {
-    if (!this.isStarted || !this.socketServer) {
+    if (!this.isStarted) {
       return;
     }
 
-    return new Promise((resolve, reject) => {
-      // Add timeout to prevent hanging
-      const timeout = setTimeout(() => {
-        this.log("Server stop timeout - forcing shutdown");
-        this.isStarted = false;
-        reject(new Error("Server stop timeout"));
-      }, 5000); // 5 second timeout
+    await this.transport.stop();
+    this.isStarted = false;
+    this.log("Server stopped");
+  }
 
-      this.socketServer!.close((error) => {
-        clearTimeout(timeout);
+  async handleHttpRequest(
+    req: IncomingMessage | { body: any; headers: any },
+    res: ServerResponse | { status: Function; json: Function }
+  ): Promise<void> {
+    if (this.transportMode !== 'http') {
+      throw new Error('handleHttpRequest can only be used with HTTP transport');
+    }
+    
+    const httpTransport = this.transport as HttpTransport;
+    await httpTransport.handleRequest(req, res);
+  }
 
-        if (error) {
-          this.log("Error stopping server:", error);
-          reject(error);
-          return;
-        }
-
-        try {
-          if (fs.existsSync(this.pipePath)) {
-            fs.unlinkSync(this.pipePath);
-          }
-        } catch (unlinkError) {
-          this.log("Error removing socket file:", unlinkError);
-        }
-
-        this.isStarted = false;
-        this.log("Server stopped");
-        resolve();
-      });
-    });
+  private getHttpUrl(): string {
+    if (this.transportMode !== 'http') {
+      throw new Error('getHttpUrl can only be used with HTTP transport');
+    }
+    
+    const httpTransport = this.transport as HttpTransport;
+    return httpTransport.getHttpUrl();
   }
 }
 
